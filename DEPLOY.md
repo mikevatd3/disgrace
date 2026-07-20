@@ -204,22 +204,18 @@ setup, but worth knowing if you need zero-downtime deploys later.
 
 ## Continuous deploy to the dev machine
 
-Separate from the droplet above: pushes to `dev` that pass CI
-(`.github/workflows/python.yml`, job `deploy-dev`) auto-update the code on a
-personal dev machine that already runs the app locally via
-`uv run uvicorn app.main:app --reload`. Because `--reload` watches the
-working directory, the deploy job only has to get the right code and
-dependencies onto disk — the already-running process restarts itself.
+Alpha-stage note: dev and prod aren't separated yet, so this currently
+targets the same droplet set up above. Pushes to `dev` that pass CI
+(`.github/workflows/python.yml`, job `deploy-dev`) auto-update the code on
+whichever machine runs this label's self-hosted runner, then restart the
+`chat_app` systemd service so the new code actually takes effect. Nothing
+here is triggered by pushes to `main`.
 
-This is **not** the same flow as the droplet: no systemd unit, no
-`sudo systemctl restart`, nothing pushed to `main`. It's one-time setup on
-whichever machine plays this role.
+### One-time setup, on the target machine
 
-### One-time setup, on the dev machine itself
-
-1. Make sure the repo is already cloned there (e.g. `~/disgrace`) and that
-   `uv run uvicorn app.main:app --reload` runs fine by hand — the deploy
-   job never starts this process, it only assumes it's already running.
+1. Make sure the repo is already cloned there (e.g. `/opt/disgrace` on the
+   droplet) and that `chat_app.service` (see step 6 above) is set up and
+   running.
 2. Register a GitHub Actions self-hosted runner scoped to this repo, labeled
    `disgrace-dev` (Settings → Actions → Runners → New self-hosted runner
    gives you the exact `./config.sh` command with a short-lived token):
@@ -232,8 +228,16 @@ whichever machine plays this role.
    needed, and no exposure to the internet.
 3. In the repo's Settings → Secrets and variables → Actions → **Variables**,
    add `DISGRACE_DEV_PATH` set to the absolute path from step 1 (e.g.
-   `/home/you/disgrace`) — the workflow's `deploy-dev` job runs its `git
+   `/opt/disgrace`) — the workflow's `deploy-dev` job runs its `git
    fetch`/`uv sync`/`alembic upgrade` there.
+4. Let the runner's own user restart the service without a password prompt
+   (the workflow runs `sudo systemctl restart chat_app` non-interactively):
+   ```
+   echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl restart chat_app" \
+     | sudo tee /etc/sudoers.d/chat_app_deploy
+   sudo chmod 440 /etc/sudoers.d/chat_app_deploy
+   sudo visudo -c   # validates syntax before it takes effect
+   ```
 
 ### Caution
 
