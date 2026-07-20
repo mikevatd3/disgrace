@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix deps.get)",
+      "Bash(curl -sSL -o assets/vendor/daisyui.js https://github.com/saadeghi/daisyui/releases/latest/download/daisyui.js)",
+      "Bash(curl -sSL -o assets/vendor/daisyui-theme.js https://github.com/saadeghi/daisyui/releases/latest/download/daisyui-theme.js)",
+      "Bash(mix tailwind.install)",
+      "Bash(mix assets.build)",
+      "Bash(./_build/tailwind-* --input=assets/css/app.css --content=/tmp/probe.html)",
+      "Bash(mix compile *)",
+      "Bash(mix deps.unlock --check-unused)",
+      "Bash(mix esbuild.install)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git fetch *)",
+      "Bash(git ls-tree *)",
+      "Bash(git stash *)",
+      "Bash(git merge *)",
+      "Bash(gh pr *)",
+      "Bash(which gh *)",
+      "Read(//opt/homebrew/bin/**)"
+    ]
+  }
+}
