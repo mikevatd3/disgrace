@@ -2,9 +2,9 @@ name: Python CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "dev" ]
 
 permissions:
   contents: read
@@ -51,3 +51,28 @@ jobs:
 
       - name: Run tests
         run: uv run pytest app/tests
+
+  deploy-dev:
+    name: Deploy dev branch to dev machine
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    # Requires a self-hosted runner registered on the dev machine with this label.
+    # See DEPLOY.md "Continuous deploy to the dev machine" for one-time setup.
+    runs-on: [self-hosted, disgrace-dev]
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+
+    # No checkout step here on purpose: this job doesn't build in a throwaway
+    # runner workspace, it updates the persistent clone the dev machine's own
+    # `uvicorn --reload` process is already watching. That process picks up
+    # the new code on disk by itself — this job's only responsibility is
+    # getting the right code and dependencies onto disk.
+    steps:
+      - name: Pull latest dev and sync dependencies
+        working-directory: ${{ vars.DISGRACE_DEV_PATH }}
+        run: |
+          git fetch origin dev
+          git merge --ff-only origin/dev
+          uv sync --frozen
+          uv run alembic upgrade head

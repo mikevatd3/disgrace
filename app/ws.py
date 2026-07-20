@@ -87,8 +87,6 @@ async def room_socket(websocket: WebSocket, room_id: int):
 
             async with async_session() as db:
                 from sqlalchemy import select
-                from sqlalchemy.orm import selectinload
-                from app.models import Reaction
                 from app.routers.messages import _query_options
 
                 message = Message(
