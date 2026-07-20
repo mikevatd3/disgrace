@@ -29,7 +29,6 @@ app/
   tests/
 alembic/               # migrations
 dev-client/            # throwaway manual-testing HTML+JS page, not the real frontend
-reference-application/ # the original Elixir/Phoenix implementation, kept for reference only — not run, not maintained
 ```
 
 ## Schema (initial)
@@ -79,4 +78,4 @@ reference-application/ # the original Elixir/Phoenix implementation, kept for re
 - Run tests with `uv run pytest app/tests`. Tests hit a real Postgres db (`chat_app_test` locally) — no mocking the database.
 
 ## Why the rewrite from Elixir/Phoenix
-The original implementation (see `reference-application/`) worked, but deployment kept hitting toolchain friction on a small (512MB) DigitalOcean droplet: compiling Erlang/OTP from source ran out of memory, and once that was fixed, apt's packaged Elixir version was too old. Python was chosen to sidestep that entire class of problem — the target deploy OS ships a usable `python3` already, and `uv` manages exact interpreter/dependency versions without ever compiling anything.
+The original implementation (an Elixir/Phoenix app, since removed) worked, but deployment kept hitting toolchain friction on a small (512MB) DigitalOcean droplet: compiling Erlang/OTP from source ran out of memory, and once that was fixed, apt's packaged Elixir version was too old. Python was chosen to sidestep that entire class of problem — the target deploy OS ships a usable `python3` already, and `uv` manages exact interpreter/dependency versions without ever compiling anything.

@@ -46,8 +46,3 @@ uv run pytest app/tests
 by hand — not the real frontend. It currently still speaks the old Phoenix
 Channels wire protocol and needs updating for the new WebSocket message
 format (`{"event": ..., "payload": ...}`).
-
-## Reference
-
-`reference-application/` is the original Elixir/Phoenix implementation of
-this same API, kept around for reference. It is not run or maintained.
