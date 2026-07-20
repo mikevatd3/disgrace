@@ -1,25 +1,24 @@
 # Deploying to a DigitalOcean Ubuntu droplet
 
-A basic, single-box deployment: Postgres, the Phoenix release, and nginx
-(TLS termination + reverse proxy) all on one Ubuntu droplet. See the
-[Deployment](README.md#deployment) section of the README first for the
-release mechanics (env vars, build, migrate) this guide builds on top of.
+A basic, single-box deployment: Postgres, the FastAPI app (via Uvicorn), and
+nginx (TLS termination + reverse proxy) all on one Ubuntu droplet.
 
 This is not a zero-downtime or highly-available setup — it's the minimum to
 get the app running behind a real domain with HTTPS.
 
+Run everything below **in one continuous SSH session, in order**. A few
+steps generate a password or secret into a shell variable that a later step
+reuses directly — if your session drops partway through, just start again
+from step 1 (nothing before the systemd step in step 6 is destructive to
+rerun).
+
 ## 0. Prerequisites
 
-- A DigitalOcean droplet running Ubuntu 22.04 or 24.04 LTS, with a non-root
-  sudo user set up (DigitalOcean's droplet creation flow can do this for
-  you) and SSH access.
-- A domain name with an A record pointing at the droplet's public IP. TLS
-  (step 6) will not work without this.
-- This guide assumes a small/medium droplet (1-2GB RAM). If you're on the
-  smallest (512MB-1GB) droplet, add swap before compiling (step 3) or the
-  build may get OOM-killed.
-
-All commands below are run as your sudo user on the droplet, unless noted.
+- A DigitalOcean droplet running Ubuntu 24.04 LTS, with a non-root sudo
+  user set up (DigitalOcean's droplet creation flow can do this for you)
+  and SSH access.
+- A domain name with an A record already pointing at the droplet's public
+  IP (needed for TLS later on).
 
 ## 1. Firewall
 
@@ -29,9 +28,8 @@ sudo ufw allow 'Nginx Full'   # 80 + 443
 sudo ufw enable
 ```
 
-The app itself binds to `127.0.0.1` only (see `config/runtime.exs`) once
-`BIND_ALL` is left unset, so it's never reachable directly from the
-internet — only nginx is exposed.
+The app itself will end up bound to `127.0.0.1` only, so it's never
+reachable directly from the internet — only nginx is exposed.
 
 ## 2. PostgreSQL
 
@@ -39,161 +37,127 @@ internet — only nginx is exposed.
 sudo apt update
 sudo apt install -y postgresql
 
-sudo -u postgres createuser --pwprompt chat_app # chat_app is still the user, and password is 'ducks writing books'
-sudo -u postgres createdb -O chat_app chat_app_prod # db name is actually disgrace
+DB_PASSWORD=$(openssl rand -hex 16)
+echo "Generated DB password (save it somewhere safe too): $DB_PASSWORD"
+
+sudo -u postgres psql -c "CREATE USER chat_app WITH PASSWORD '$DB_PASSWORD';"
+sudo -u postgres createdb -O chat_app chat_app_prod
 ```
 
-Note the password you set — it goes into `DATABASE_URL` in step 5.
+`$DB_PASSWORD` stays set for the rest of this session and gets used
+directly when building `DATABASE_URL` in step 5.
 
-## 3. Erlang / Elixir
-
-This project pins exact versions in `.tool-versions`. Install them with
-[asdf](https://asdf-vm.com/):
+## 3. Get the code
 
 ```
-sudo apt install -y build-essential autoconf m4 libncurses-dev \
-  libssl-dev unixodbc-dev libgl1-mesa-dev libglu1-mesa-dev libpng-dev \
-  libssh-dev unzip zip git curl
-
-git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.15.0
-echo '. "$HOME/.asdf/asdf.sh"' >> ~/.bashrc
-source ~/.asdf/asdf.sh
-
-asdf plugin add erlang
-asdf plugin add elixir
-
-# kerl (which builds Erlang from source) fails the whole build by default
-# if ANY optional application is disabled — e.g. jinterface (needs a JDK)
-# or wx (needs wxWidgets). We don't need Java bindings or a GUI toolkit on
-# a headless server, so tell it not to treat that as fatal:
-export KERL_STRICT_INSTALL=no
-
-cd /path/to/disgrace   # after cloning the repo, see step 4
-asdf install           # reads .tool-versions
+git clone <your-repo-url> ~/disgrace
+cd ~/disgrace
 ```
 
-Erlang's build from source takes a while (5-10 minutes) — this is normal.
-If it fails with `ERROR: build failed` right after an "APPLICATIONS
-DISABLED"/"APPLICATIONS INFORMATION" summary (rather than an actual
-compiler error), that's this `KERL_STRICT_INSTALL` behavior — the compile
-itself succeeded, kerl just refused to call it done.
+Everything from here on assumes you're inside this directory.
 
-## 4. Get the code and build a release
+## 4. Python / dependencies
+
+Install [uv](https://docs.astral.sh/uv/) — it downloads a prebuilt Python
+3.12 itself (matching `requires-python` in `pyproject.toml`) rather than
+relying on whatever the OS happens to ship, and installs dependencies from
+`uv.lock`. Nothing gets compiled:
 
 ```
-git clone <your-repo-url> disgrace
-cd disgrace
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
 
-export SECRET_KEY_BASE=$(mix phx.gen.secret)   # save this, see step 5
-mix local.hex --force
-mix local.rebar --force
-
-MIX_ENV=prod mix deps.get --only prod
-MIX_ENV=prod mix compile
-MIX_ENV=prod mix release
+uv sync --frozen
 ```
 
-Releases are built for the same OS/architecture they'll run on, so build
-directly on the droplet (or a matching container) — don't copy a release
-built on your Mac/dev machine over.
+`uv sync --frozen` fails loudly instead of silently re-resolving if
+`uv.lock` and `pyproject.toml` are out of sync — that's intentional here.
 
 ## 5. Environment variables
 
-Create `/etc/chat_app.env` (root-only, holds secrets):
-
 ```
-sudo tee /etc/chat_app.env > /dev/null <<'EOF'
-DATABASE_URL=ecto://chat_app:YOUR_DB_PASSWORD@localhost/chat_app_prod
-SECRET_KEY_BASE=YOUR_SECRET_KEY_BASE
-PHX_HOST=chat.example.com
-PHX_SERVER=true
+export DOMAIN=chat.example.com   # replace with your real domain
+SECRET_KEY=$(openssl rand -hex 32)
+
+sudo tee /etc/chat_app.env > /dev/null <<EOF
+DATABASE_URL=postgresql+asyncpg://chat_app:${DB_PASSWORD}@localhost/chat_app_prod
+SECRET_KEY=${SECRET_KEY}
+SOCKET_ORIGINS=https://${DOMAIN}
 EOF
 
 sudo chmod 600 /etc/chat_app.env
 ```
 
-Fill in the DB password from step 2 and the `SECRET_KEY_BASE` from step 4.
-`PHX_HOST` must match the domain pointing at this droplet. See the
-[env var table](README.md#deployment) in the README for the full list
-(`PORT`, `POOL_SIZE`, `SOCKET_ORIGINS`, etc.) if you need to override
-defaults — e.g. set `SOCKET_ORIGINS` if the frontend is served from a
-different domain than the API.
+This reuses `$DB_PASSWORD` from step 2. `SOCKET_ORIGINS` is the allowlist
+for cross-origin cookie-authenticated requests (REST and WebSocket) — set
+it to wherever the actual frontend is served from; use a comma-separated
+list if there's more than one (e.g. a staging and a production frontend).
 
-## 6. Migrate and set up the systemd service
-
-Run migrations once per deploy (this and future ones):
+## 6. Migrate and start the service
 
 ```
-/home/YOUR_USER/disgrace/_build/prod/rel/chat_app/bin/chat_app eval \
-  "ChatApp.Release.migrate()"
+set -a; source /etc/chat_app.env; set +a
+uv run alembic upgrade head
 ```
 
-(This one-off run needs the env vars too — either `source /etc/chat_app.env`
-first, or run it via `systemd-run` with the same EnvironmentFile. Easiest is
-to start the service once via step 7 below, then re-run migrations through
-`systemctl` after future deploys — see step 8.)
-
-Create `/etc/systemd/system/chat_app.service`:
+Now create the systemd unit:
 
 ```
-sudo tee /etc/systemd/system/chat_app.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/chat_app.service > /dev/null <<EOF
 [Unit]
-Description=chat_app Phoenix release
+Description=chat_app FastAPI service
 After=network.target postgresql.service
 
 [Service]
 Type=exec
-User=YOUR_USER
-WorkingDirectory=/home/YOUR_USER/disgrace
+User=$(whoami)
+WorkingDirectory=$HOME/disgrace
 EnvironmentFile=/etc/chat_app.env
-ExecStart=/home/YOUR_USER/disgrace/_build/prod/rel/chat_app/bin/chat_app start
-ExecStop=/home/YOUR_USER/disgrace/_build/prod/rel/chat_app/bin/chat_app stop
+ExecStart=$HOME/.local/bin/uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-```
 
-Replace `YOUR_USER` (both the `User=` line and the paths) with your actual
-sudo username, then:
-
-```
 sudo systemctl daemon-reload
 sudo systemctl enable --now chat_app
 sudo systemctl status chat_app
-journalctl -u chat_app -f   # tail logs
+journalctl -u chat_app -f   # tail logs, Ctrl-C to stop tailing
 ```
 
-It should be listening on `127.0.0.1:4000`.
+It should be listening on `127.0.0.1:8000`.
+
+Deliberately **no `--workers` flag**: room presence and the WebSocket
+connection registry (`app/ws.py`) live in a single process's memory. Adding
+Uvicorn workers would silently split users across separate processes that
+can't see each other — presence and broadcast would start missing people
+with no error. If this ever needs to scale beyond one process, that state
+needs to move to something shared (e.g. Redis pub/sub) first.
 
 ## 7. nginx reverse proxy + TLS
 
 ```
 sudo apt install -y nginx certbot python3-certbot-nginx
-```
 
-Create `/etc/nginx/sites-available/chat_app`:
-
-```
-sudo tee /etc/nginx/sites-available/chat_app > /dev/null <<'EOF'
+sudo tee /etc/nginx/sites-available/chat_app > /dev/null <<EOF
 server {
     listen 80;
-    server_name chat.example.com;
+    server_name $DOMAIN;
 
     location / {
-        proxy_pass http://127.0.0.1:4000;
+        proxy_pass http://127.0.0.1:8000;
         proxy_http_version 1.1;
 
-        # Required for Phoenix Channels (WebSocket upgrade)
-        proxy_set_header Upgrade $http_upgrade;
+        # Required for the WebSocket routes (chat, presence)
+        proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
 
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
 EOF
@@ -201,40 +165,37 @@ EOF
 sudo ln -s /etc/nginx/sites-available/chat_app /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
+
+sudo certbot --nginx -d $DOMAIN
 ```
 
-Replace `chat.example.com` with your real domain, then get a certificate
 (certbot edits the nginx config in place to add the `listen 443 ssl` block
-and redirect):
-
-```
-sudo certbot --nginx -d chat.example.com
-```
-
-The `Upgrade`/`Connection` headers above are what make WebSocket channel
-connections work through the proxy — without them, REST endpoints work
-fine but `RoomChannel` joins will fail.
+and the HTTP→HTTPS redirect.) The `Upgrade`/`Connection` headers above are
+what make WebSocket connections work through the proxy — without them,
+REST endpoints work fine but `/ws/rooms/{id}` connections will fail.
 
 ## 8. Verify
 
 ```
-curl -i https://chat.example.com/api/rooms
+curl -i https://$DOMAIN/api/rooms
 ```
 
-Should return `401 {"error":"unauthenticated"}` (correct — you're not
+Should return `401 {"detail":"unauthenticated"}` (correct — you're not
 logged in, but it proves the app, nginx, and TLS are all wired up).
 
 ## Redeploying after code changes
 
+A separate, repeatable procedure for later — not part of the initial setup
+above. Run as the same deploy user, from a fresh session if you like:
+
 ```
-cd /home/YOUR_USER/disgrace
+cd ~/disgrace
 git pull
-MIX_ENV=prod mix deps.get --only prod
-MIX_ENV=prod mix compile
-MIX_ENV=prod mix release --overwrite
+uv sync --frozen
 
 sudo systemctl stop chat_app
-_build/prod/rel/chat_app/bin/chat_app eval "ChatApp.Release.migrate()"
+set -a; source /etc/chat_app.env; set +a
+uv run alembic upgrade head
 sudo systemctl start chat_app
 ```
 
