@@ -34,7 +34,22 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/docs)",
       "WebSearch",
       "Bash(curl -s http://localhost:8000/)",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/api/rooms)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8000/api/rooms)",
+      "Bash(grep -niA2 \"uvicorn\\\\|run\\\\|uv run\\\\|8000\" README.md)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8000/api/rooms)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" -X POST http://localhost:8000/api/session/register -H \"Content-Type: application/json\" -d '{\"name\":\"testuser\",\"password\":\"testpass123\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/session/register -H \"Content-Type: application/json\" -d '{\"name\":\"tomtest\",\"password\":\"Testpass123!\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/chat_app_dev\" -c \"SELECT id, name FROM users ORDER BY name, id;\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/chat_app_dev\" -c \"SELECT user_id, count\\(*\\) FROM messages GROUP BY user_id ORDER BY user_id;\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/postgres\" -c \"DROP DATABASE chat_app_dev;\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/postgres\" -c \"CREATE DATABASE chat_app_dev;\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/postgres\" -c \"SELECT pg_terminate_backend\\(pid\\) FROM pg_stat_activity WHERE datname='chat_app_dev' AND pid<>pg_backend_pid\\(\\);\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/postgres\" -c \"DROP DATABASE IF EXISTS chat_app_dev;\")",
+      "Bash(psql \"postgresql://postgres:postgres@localhost/chat_app_dev\" -c \"DELETE FROM users WHERE name='tomtest';\")",
+      "Bash(curl -s \"https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/)",
+      "Bash(echo \"HTTP: $\\(curl -s -o /dev/null -w '%{http_code}' http://localhost:8000/\\)\")",
+      "Bash(python3 -)"
     ]
   }
 }

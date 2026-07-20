@@ -4,13 +4,8 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Disgrace</title>
-  <!-- No build step: Tailwind (utilities) + DaisyUI (components) via CDN. -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link
-    href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css"
-    rel="stylesheet"
-    type="text/css"
-  />
+  <!-- Compiled locally from styles/app.css (Tailwind + DaisyUI). Rebuild with `npm run build:css`. -->
+  <link rel="stylesheet" href="/app.css" />
 </head>
 <body class="bg-base-200">
   <!-- ===================== LOGIN / REGISTER ===================== -->
@@ -72,10 +67,13 @@
   </section>
 
   <!-- ===================== APP ===================== -->
-  <section id="app-view" class="hidden h-screen flex">
+  <section id="app-view" class="hidden h-screen drawer lg:drawer-open">
+    <input id="app-drawer" type="checkbox" class="drawer-toggle" />
 
-    <!-- ── Sidebar ── -->
-    <aside class="w-60 flex flex-col min-h-0 bg-base-200 border-r border-base-300">
+    <!-- ── Sidebar (slide-in drawer on mobile, pinned on lg+) ── -->
+    <div class="drawer-side z-40">
+      <div aria-label="Close channel list" onclick="closeDrawer()" class="drawer-overlay cursor-pointer"></div>
+      <aside class="w-60 h-full flex flex-col min-h-0 bg-base-200 border-r border-base-300">
 
       <!-- Server name header -->
       <div class="px-4 py-3 border-b border-base-300 flex items-center justify-between flex-shrink-0">
@@ -107,25 +105,44 @@
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
         </button>
       </div>
-    </aside>
+      </aside>
+    </div><!-- /drawer-side -->
 
     <!-- ── Chat area ── -->
+    <div class="drawer-content flex flex-col min-h-0">
     <main class="flex-1 flex flex-col min-h-0 bg-base-100">
 
       <!-- Empty state -->
-      <div id="no-room" class="flex-1 flex items-center justify-center opacity-30 text-lg">
-        Select a channel to start chatting.
+      <div id="no-room" class="flex-1 flex flex-col min-h-0">
+        <!-- Mobile top bar so the drawer is reachable when no channel is open -->
+        <div class="flex-shrink-0 h-12 border-b border-base-300 flex items-center px-3 lg:hidden">
+          <button type="button" onclick="toggleDrawer()" aria-label="Open channel list" class="btn btn-ghost btn-sm btn-square -ml-1">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <span class="ml-1 font-semibold opacity-70">Disgrace</span>
+        </div>
+        <div class="flex-1 flex items-center justify-center opacity-30 text-lg px-4 text-center">
+          Select a channel to start chatting.
+        </div>
       </div>
 
       <!-- Active room -->
       <div id="room-view" class="hidden flex-1 flex flex-col min-h-0">
 
         <!-- Channel header -->
-        <div class="flex-shrink-0 h-12 border-b border-base-300 flex items-center px-4 gap-2 shadow-sm">
+        <div class="flex-shrink-0 h-12 border-b border-base-300 flex items-center px-3 sm:px-4 gap-2 shadow-sm">
+          <button type="button" onclick="toggleDrawer()" aria-label="Open channel list" class="btn btn-ghost btn-sm btn-square lg:hidden -ml-1">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
           <span class="text-base-content/50 font-bold text-lg">#</span>
-          <span id="room-title" class="font-semibold text-base flex-1"></span>
+          <span id="room-title" class="font-semibold text-base flex-1 min-w-0 truncate"></span>
+          <!-- Mobile-only search trigger (expands the bar below as an overlay) -->
+          <button type="button" id="mobile-search-btn" onclick="openMobileSearch()" aria-label="Search"
+            class="btn btn-ghost btn-sm btn-square md:hidden -mr-1">
+            <svg class="w-5 h-5 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          </button>
           <!-- Search bar -->
-          <div id="search-wrap" class="relative flex-shrink-0">
+          <div id="search-wrap" class="relative flex-shrink-0 hidden md:block">
             <div id="search-bar" class="flex items-center bg-base-200 rounded-lg pl-3 pr-1 gap-1.5 h-8 min-w-[200px]">
               <svg class="w-3.5 h-3.5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
               <div id="search-chips" class="flex items-center gap-1"></div>
@@ -172,7 +189,7 @@
         </form>
 
         <!-- Emoji picker popup -->
-        <div id="emoji-picker" class="hidden fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl flex flex-col" style="width:360px;max-height:420px">
+        <div id="emoji-picker" class="hidden fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-xl flex flex-col" style="width:min(360px, calc(100vw - 1rem));max-height:420px">
           <div class="p-2 border-b border-base-300 flex-shrink-0">
             <input id="emoji-search" type="text" placeholder="Search emoji…"
               class="input input-bordered input-sm w-full" autocomplete="off" />
@@ -184,7 +201,7 @@
     </main>
 
     <!-- Search dropdown (fixed, positioned by JS) -->
-  <div id="search-dropdown" class="hidden fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-2xl overflow-hidden" style="width:380px">
+  <div id="search-dropdown" class="hidden fixed z-50 bg-base-100 border border-base-300 rounded-xl shadow-2xl overflow-hidden" style="width:min(380px, calc(100vw - 1rem))">
     <div id="search-dropdown-body" class="overflow-y-auto" style="max-height:480px"></div>
   </div>
 
@@ -298,6 +315,7 @@
       </div>
       <form method="dialog" class="modal-backdrop"><button>close</button></form>
     </dialog>
+    </div><!-- /drawer-content -->
   </section>
 
   <script>
@@ -775,7 +793,24 @@
       renderRooms();
     }
 
+    // ------------------------------------------------------------------
+    // Mobile drawer (JS-driven so it works on iOS Safari, where a bare
+    // <label for> does not reliably toggle an opacity:0 checkbox).
+    // ------------------------------------------------------------------
+    function setDrawer(open) {
+      const cb = document.getElementById("app-drawer");
+      if (cb) cb.checked = open;
+    }
+    function openDrawer()  { setDrawer(true); }
+    function closeDrawer() { setDrawer(false); }
+    function toggleDrawer() {
+      const cb = document.getElementById("app-drawer");
+      if (cb) cb.checked = !cb.checked;
+    }
+
     async function selectRoom(roomId) {
+      // On mobile, tapping any channel closes the slide-in drawer (no-op on lg+).
+      closeDrawer();
       if (state.currentRoomId === roomId) return;
       state.currentRoomId = roomId;
       location.hash = `room-${roomId}`;
@@ -864,6 +899,10 @@
     function showApp() {
       showView("app-view");
       refreshNavAvatar();
+      // With no channel open yet, reveal the drawer so the channel list is the
+      // first thing seen on mobile (Discord-style). Harmless on lg+ where the
+      // sidebar is always pinned (lg:drawer-open) regardless of this checkbox.
+      setDrawer(!state.currentRoomId);
     }
 
     async function handleAuth(endpoint, name, password, errElId) {
@@ -1159,6 +1198,17 @@
       _renderDropdown();
     }
 
+    // Phone-only: reveal the (normally md:block) search bar as a full-width
+    // overlay across the header, then focus it — onfocus opens the dropdown.
+    function openMobileSearch() {
+      const wrap = $("#search-wrap");
+      wrap.style.cssText = "position:absolute;left:0.5rem;right:0.5rem;top:0.375rem;z-index:20;display:block";
+      const bar = $("#search-bar");
+      bar.style.minWidth = "0";
+      bar.style.width = "100%";
+      $("#search-input").focus();
+    }
+
     function closeSearch() {
       $("#search-dropdown").classList.add("hidden");
       $("#search-x").classList.add("hidden");
@@ -1167,6 +1217,11 @@
       _searchFilters = {};
       _renderChips();
       clearTimeout(_searchDebounce);
+      // Collapse the mobile overlay back to its class-driven (hidden md:block) state.
+      $("#search-wrap").style.cssText = "";
+      const bar = $("#search-bar");
+      bar.style.minWidth = "";
+      bar.style.width = "";
     }
 
     function onSearchFocus() {

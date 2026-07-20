@@ -40,6 +40,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
+# Node tooling for the frontend CSS build (Tailwind + DaisyUI).
+# node_modules is dev-only; the compiled frontend/app.css IS committed.
+node_modules/
+
 # Don't put user photos in git
 *.jpg
 *.jpeg

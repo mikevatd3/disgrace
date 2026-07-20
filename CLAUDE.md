@@ -57,6 +57,11 @@ dev-client/            # throwaway manual-testing HTML+JS page, not the real fro
 **Design system:** [Official DaisyUI Figma Library]
 (reference ~/.claude/CLAUDE.md for file location)
 
+## Build (CSS)
+- Tailwind + DaisyUI are compiled locally (not the CDN). Source: `styles/app.css` + `tailwind.config.js`; output: `frontend/app.css`, which `frontend/index.html` links as `/app.css`.
+- After changing any classes in `frontend/index.html`, rebuild: `npm run build:css` (or `npm run watch:css` while developing). Tailwind's content scan only reads `frontend/index.html`, so a class that never appears there as a literal string won't be generated — avoid constructing class names by string concatenation in JS.
+- Pinned to Tailwind v3 + DaisyUI v4 (matches the previous CDN). Node/`node_modules` are dev-only; **the compiled `frontend/app.css` is committed** so deploys need no build step (keeps the droplet toolchain-free).
+
 ## CRITICAL RULE
 **Always use DaisyUI components and utility classes. Never invent custom component styles without explicit permission from the team.** If a DaisyUI component exists for a use case, use it — do not roll a bespoke alternative.
 
