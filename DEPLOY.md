@@ -201,3 +201,48 @@ sudo systemctl start chat_app
 
 This causes brief downtime during the restart — acceptable for a basic
 setup, but worth knowing if you need zero-downtime deploys later.
+
+## Continuous deploy to the dev machine
+
+Alpha-stage note: dev and prod aren't separated yet, so this currently
+targets the same droplet set up above. Pushes to `dev` that pass CI
+(`.github/workflows/python.yml`, job `deploy-dev`) auto-update the code on
+whichever machine runs this label's self-hosted runner, then restart the
+`chat_app` systemd service so the new code actually takes effect. Nothing
+here is triggered by pushes to `main`.
+
+### One-time setup, on the target machine
+
+1. Make sure the repo is already cloned there (e.g. `/opt/disgrace` on the
+   droplet) and that `chat_app.service` (see step 6 above) is set up and
+   running.
+2. Register a GitHub Actions self-hosted runner scoped to this repo, labeled
+   `disgrace-dev` (Settings → Actions → Runners → New self-hosted runner
+   gives you the exact `./config.sh` command with a short-lived token):
+   ```
+   ./config.sh --url https://github.com/<org>/<repo> --labels disgrace-dev
+   ./svc.sh install
+   ./svc.sh start
+   ```
+   It polls GitHub over outbound HTTPS — no inbound ports or SSH keys
+   needed, and no exposure to the internet.
+3. In the repo's Settings → Secrets and variables → Actions → **Variables**,
+   add `DISGRACE_DEV_PATH` set to the absolute path from step 1 (e.g.
+   `/opt/disgrace`) — the workflow's `deploy-dev` job runs its `git
+   fetch`/`uv sync`/`alembic upgrade` there.
+4. Let the runner's own user restart the service without a password prompt
+   (the workflow runs `sudo systemctl restart chat_app` non-interactively):
+   ```
+   echo "$(whoami) ALL=(root) NOPASSWD: /usr/bin/systemctl restart chat_app" \
+     | sudo tee /etc/sudoers.d/chat_app_deploy
+   sudo chmod 440 /etc/sudoers.d/chat_app_deploy
+   sudo visudo -c   # validates syntax before it takes effect
+   ```
+
+### Caution
+
+A self-hosted runner executes whatever the workflow file says, as the user
+that installed the service — treat that account's access (this git repo,
+this Postgres instance, anything else reachable from that machine) as
+exposed to anything landing on `dev`. Fine for a personal dev box merged to
+by one person; reconsider before pointing this at anything shared.

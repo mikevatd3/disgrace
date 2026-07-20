@@ -1,5 +1,8 @@
-async def login(client, name="mike"):
-    resp = await client.post("/api/session", json={"name": name})
+async def login(client, name="mike", password="correct-horse-battery-1"):
+    resp = await client.post(
+        "/api/session/register",
+        json={"name": name, "password": password},
+    )
     assert resp.status_code == 201
     return resp.json()
 

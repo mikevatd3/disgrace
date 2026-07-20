@@ -1,0 +1,80 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Lint and test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: chat_app_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/chat_app_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Run migrations
+        run: uv run alembic upgrade head
+
+      - name: Run tests
+        run: uv run pytest app/tests
+
+  deploy-dev:
+    name: Deploy dev branch to dev machine
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    # Requires a self-hosted runner registered on the dev machine with this label.
+    # See DEPLOY.md "Continuous deploy to the dev machine" for one-time setup.
+    runs-on: [self-hosted, disgrace-dev]
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+
+    # No checkout step here on purpose: this job doesn't build in a throwaway
+    # runner workspace, it updates the persistent clone that backs the
+    # systemd-managed chat_app service, then restarts that service to pick
+    # up the new code.
+    steps:
+      - name: Pull latest dev and sync dependencies
+        working-directory: ${{ vars.DISGRACE_DEV_PATH }}
+        run: |
+          git fetch origin dev
+          git merge --ff-only origin/dev
+          uv sync --frozen
+          uv run alembic upgrade head
+
+      - name: Restart chat_app service
+        run: sudo systemctl restart chat_app

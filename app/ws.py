@@ -4,6 +4,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.db import async_session
 from app.models import Message, Room, User
+from app.routers.messages import _serialize
 
 router = APIRouter()
 
@@ -22,7 +23,7 @@ class RoomConnectionManager:
         self.rooms[room_id][websocket] = user
         await self._broadcast(
             room_id,
-            {"event": "presence_diff", "payload": {"joins": {str(user.id): {"name": user.name}}, "leaves": {}}},
+            {"event": "presence_diff", "payload": {"joins": {str(user.id): self._user_info(user)}, "leaves": {}}},
             skip=websocket,
         )
 
@@ -32,26 +33,17 @@ class RoomConnectionManager:
             return
         await self._broadcast(
             room_id,
-            {"event": "presence_diff", "payload": {"joins": {}, "leaves": {str(user.id): {"name": user.name}}}},
+            {"event": "presence_diff", "payload": {"joins": {}, "leaves": {str(user.id): self._user_info(user)}}},
         )
 
-    async def broadcast_message(self, room_id: int, message: Message) -> None:
-        await self._broadcast(
-            room_id,
-            {
-                "event": "new_message",
-                "payload": {
-                    "id": message.id,
-                    "room_id": message.room_id,
-                    "user_id": message.user_id,
-                    "body": message.body,
-                    "created_at": message.created_at.isoformat(),
-                },
-            },
-        )
+    async def broadcast_event(self, room_id: int, event: str, payload: dict) -> None:
+        await self._broadcast(room_id, {"event": event, "payload": payload})
+
+    def _user_info(self, user: User) -> dict:
+        return {"name": user.name, "avatar_url": user.avatar_url}
 
     def _presence(self, room_id: int) -> dict:
-        return {str(user.id): {"name": user.name} for user in self.rooms.get(room_id, {}).values()}
+        return {str(user.id): self._user_info(user) for user in self.rooms.get(room_id, {}).values()}
 
     async def _broadcast(self, room_id: int, message: dict, skip: WebSocket | None = None) -> None:
         for ws in list(self.rooms.get(room_id, {})):
@@ -62,10 +54,15 @@ class RoomConnectionManager:
 manager = RoomConnectionManager()
 
 
+def _msg_payload(msg: Message) -> dict:
+    return _serialize(msg).model_dump(mode="json")
+
+
 @router.websocket("/ws/rooms/{room_id}")
 async def room_socket(websocket: WebSocket, room_id: int):
     user_id = websocket.session.get("user_id")
     if user_id is None:
+        await websocket.accept()
         await websocket.close(code=4401)
         return
 
@@ -73,6 +70,7 @@ async def room_socket(websocket: WebSocket, room_id: int):
         user = await db.get(User, user_id)
         room = await db.get(Room, room_id)
         if user is None or room is None:
+            await websocket.accept()
             await websocket.close(code=4404)
             return
 
@@ -83,16 +81,29 @@ async def room_socket(websocket: WebSocket, room_id: int):
             raw = await websocket.receive_text()
             data = json.loads(raw)
             body = data.get("body", "").strip()
+            reply_to_id = data.get("reply_to_id")
             if not body:
                 continue
 
             async with async_session() as db:
-                message = Message(room_id=room_id, user_id=user.id, body=body)
+                from sqlalchemy import select
+                from app.routers.messages import _query_options
+
+                message = Message(
+                    room_id=room_id,
+                    user_id=user.id,
+                    body=body,
+                    reply_to_id=reply_to_id,
+                )
                 db.add(message)
                 await db.commit()
                 await db.refresh(message)
 
-            await manager.broadcast_message(room_id, message)
+                message = await db.scalar(
+                    select(Message).where(Message.id == message.id).options(*_query_options())
+                )
+
+            await manager.broadcast_event(room_id, "new_message", _msg_payload(message))
     except WebSocketDisconnect:
         pass
     finally:
