@@ -41,6 +41,16 @@ dev-client/            # throwaway manual-testing HTML+JS page, not the real fro
 - "Who's online" presence is implemented (`presence_state` on join, `presence_diff` broadcasts) — in-memory per-process, not distributed. Fine for a single-instance deploy; would need rework (e.g. Redis pub/sub) if ever run with multiple app processes/workers.
 - Don't add features not explicitly requested (no read receipts, typing indicators, etc. unless asked).
 - SQL: Postgres only, no other DB assumptions.
+- Use `uv add <pkg>` to add dependencies (updates `pyproject.toml` + `uv.lock`), `uv run <cmd>` to run anything in the project's environment. Don't use bare `pip`/`python -m venv`.
+
+## Tests
+- Location: `app/tests/`. Run with `uv run pytest app/tests`.
+- Real Postgres only — no mocking the database (`app/tests/conftest.py` points `DATABASE_URL` at `chat_app_test` by default). Locally: `createdb chat_app_test`, then `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost/chat_app_test uv run alembic upgrade head` before running tests the first time (and again after any new migration).
+- `pyproject.toml` sets `asyncio_mode = "auto"` — test functions are just `async def test_...`, no `@pytest.mark.asyncio` needed.
+- Hit the API through the `client` fixture (an httpx `AsyncClient` over `ASGITransport(app=app)`), not by calling router functions directly — this exercises real request/response handling, auth dependencies, and session cookies.
+- Auth-required endpoints: register a user first (`POST /api/session/register`) to get a logged-in session on `client` — see the `login()` helper at the top of `test_api.py`. Don't bypass auth by injecting a session/user directly.
+- The autouse `clean_db` fixture truncates `messages, rooms, users` with `CASCADE` after each test, which also clears any table with a foreign key back to them (e.g. `reactions`). Adding a new table with no FK tie to those three means adding it to that `TRUNCATE` list explicitly.
+- CI (`.github/workflows/python.yml`) runs, in order: `ruff check .`, then `uv run alembic upgrade head`, then `uv run pytest app/tests` — against a real Postgres service container, on push/PR to `main` or `dev`. A schema change without a matching migration fails CI at the migrate step, before tests even run.
 
 # Frontend: DaisyUI + Tailwind CSS
 
@@ -73,9 +83,6 @@ dev-client/            # throwaway manual-testing HTML+JS page, not the real fro
 - Write custom CSS classes that duplicate DaisyUI component behavior.
 - Use raw Tailwind classes to replicate a component that already exists in DaisyUI (e.g., don't build a button from `px-4 py-2 rounded bg-blue-500` when `btn btn-primary` exists).
 - Override DaisyUI component styles inline without a clear reason tied to a specific product requirement.
-
-- Use `uv add <pkg>` to add dependencies (updates `pyproject.toml` + `uv.lock`), `uv run <cmd>` to run anything in the project's environment. Don't use bare `pip`/`python -m venv`.
-- Run tests with `uv run pytest app/tests`. Tests hit a real Postgres db (`chat_app_test` locally) — no mocking the database.
 
 ## Why the rewrite from Elixir/Phoenix
 The original implementation (an Elixir/Phoenix app, since removed) worked, but deployment kept hitting toolchain friction on a small (512MB) DigitalOcean droplet: compiling Erlang/OTP from source ran out of memory, and once that was fixed, apt's packaged Elixir version was too old. Python was chosen to sidestep that entire class of problem — the target deploy OS ships a usable `python3` already, and `uv` manages exact interpreter/dependency versions without ever compiling anything.
