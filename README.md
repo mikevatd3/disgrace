@@ -1,6 +1,6 @@
 # disgrace
 
-A chat app. Backend-only API (see `CLAUDE.md`) — frontend is handled separately.
+A chat app — backend and frontend both live in this repo (see `CLAUDE.md`).
 
 ## Stack
 
