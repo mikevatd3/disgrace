@@ -315,7 +315,18 @@
       </div>
       <form method="dialog" class="modal-backdrop"><button>close</button></form>
     </dialog>
-    </div><!-- /drawer-content -->
+
+    <!-- Euchre modal -->
+    <dialog id="euchre-modal" class="modal">
+      <div class="modal-box w-full max-w-2xl">
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-bold text-lg">Euchre</h3>
+          <button type="button" class="btn btn-ghost btn-sm btn-square" onclick="document.getElementById('euchre-modal').close()">✕</button>
+        </div>
+        <div id="euchre-body"></div>
+      </div>
+      <form method="dialog" class="modal-backdrop"><button>close</button></form>
+    </dialog>
   </section>
 
   <script>
@@ -492,6 +503,7 @@
       userInfo: {},         // { [userId]: { name, avatar_url } }
       presence: {},         // { [userId]: { name, avatar_url } } for current room
       messageCache: {},     // { [msgId]: msg } for edit/react updates
+      game: null,           // current room's euchre GameOut, or null
     };
 
     // ------------------------------------------------------------------
@@ -587,6 +599,7 @@
           `<span class="truncate">${escapeHtml(info.name)}</span>`;
         list.appendChild(li);
       }
+      renderGame();
     }
 
     // ------------------------------------------------------------------
@@ -828,9 +841,15 @@
       renderPresence();
       renderRooms();
 
+      document.getElementById("euchre-modal").close();
+      state.game = null;
+
       const history = await api("GET", `/api/rooms/${roomId}/messages?limit=50`);
       for (const m of history) appendMessage(m);
       scrollMessagesToBottom();
+
+      state.game = await api("GET", `/api/rooms/${roomId}/games/current`);
+      renderGame();
 
       openSocket(roomId);
     }
@@ -863,6 +882,9 @@
         } else if (type === "new_message") {
           appendMessage(payload);
           scrollMessagesToBottom();
+        } else if (type === "game_state") {
+          state.game = payload;
+          renderGame();
         }
       };
 
@@ -872,6 +894,309 @@
         console.log("[ws] closed, code:", e.code, "reason:", e.reason);
         if (e.code === 4401) alert("Session expired — please log in again.");
       };
+    }
+
+    // ------------------------------------------------------------------
+    // Euchre widget
+    // ------------------------------------------------------------------
+    const SUIT_SYMBOLS = { S: "♠", H: "♥", D: "♦", C: "♣" };
+
+    function suitSymbol(suit) {
+      return SUIT_SYMBOLS[suit] || suit;
+    }
+
+    function suitColorClass(suit) {
+      return suit === "H" || suit === "D" ? "text-error" : "";
+    }
+
+    function cardLabel(card) {
+      const rank = card[0] === "T" ? "10" : card[0];
+      return `${rank}${suitSymbol(card[1])}`;
+    }
+
+    function euchreBasePath() {
+      return `/api/rooms/${state.currentRoomId}/games/${state.game.id}`;
+    }
+
+    async function gameAction(path, body) {
+      try {
+        await api("POST", path, body);
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function startEuchreLobby() {
+      try {
+        state.game = await api("POST", `/api/rooms/${state.currentRoomId}/games`);
+        renderGame();
+      } catch (err) {
+        alert(err.message);
+      }
+    }
+
+    async function joinEuchre() {
+      await gameAction(`${euchreBasePath()}/join`);
+    }
+
+    async function leaveEuchre() {
+      await gameAction(`${euchreBasePath()}/leave`);
+    }
+
+    async function submitBid(action, suit, alone) {
+      await gameAction(`${euchreBasePath()}/bid`, { action, suit: suit || null, alone: !!alone });
+    }
+
+    async function submitDiscard(card) {
+      await gameAction(`${euchreBasePath()}/discard`, { card });
+    }
+
+    async function playCard(card) {
+      await gameAction(`${euchreBasePath()}/play`, { card });
+    }
+
+    async function continueHand() {
+      await gameAction(`${euchreBasePath()}/continue`);
+    }
+
+    async function abandonGame() {
+      if (!state.game) return;
+      if (!confirm("Abandon the current euchre game?")) return;
+      await gameAction(`${euchreBasePath()}/abandon`);
+    }
+
+    function renderGame() {
+      const badge = $("#euchre-badge");
+      const body = $("#euchre-body");
+      if (!body) return;
+      const g = state.game;
+
+      if (!g || g.status === "lobby") {
+        badge.classList.toggle("hidden", !g);
+      } else if (g.status === "in_progress") {
+        badge.classList.remove("hidden");
+      } else {
+        badge.classList.add("hidden");
+      }
+
+      if (!g || g.status === "completed" || g.status === "abandoned") {
+        body.innerHTML = renderEuchreStart(g);
+      } else if (g.status === "lobby") {
+        body.innerHTML = renderEuchreLobby(g);
+      } else {
+        body.innerHTML = renderEuchreTable(g);
+      }
+    }
+
+    function renderEuchreStart(g) {
+      let banner = "";
+      if (g && g.status === "completed") {
+        const winner = g.winning_team === 0 ? "Team 1 (seats 1 & 3)" : "Team 2 (seats 2 & 4)";
+        banner = `<div class="alert alert-success mb-4">${winner} won ${g.team0_score}–${g.team1_score}!</div>`;
+      } else if (g && g.status === "abandoned") {
+        banner = `<div class="alert alert-warning mb-4">The last game was abandoned.</div>`;
+      }
+      return `
+        ${banner}
+        <p class="opacity-60 mb-4">No euchre game is running in this room.</p>
+        <button type="button" class="btn btn-primary" onclick="startEuchreLobby()">Start a game</button>
+      `;
+    }
+
+    function renderEuchreLobby(g) {
+      const rows = [0, 1, 2, 3].map((seat) => {
+        const p = g.players.find((pl) => pl.seat === seat);
+        const team = seat % 2 === 0 ? "Team 1" : "Team 2";
+        if (p) {
+          return `<div class="flex items-center justify-between px-3 py-2 rounded bg-base-200">
+            <span class="flex items-center gap-2">${avatarHtml(p.user_name, p.user_avatar, "w-6 h-6")}<span>${escapeHtml(p.user_name || "Player")}</span></span>
+            <span class="badge badge-ghost badge-sm">${team}</span>
+          </div>`;
+        }
+        return `<div class="flex items-center justify-between px-3 py-2 rounded border border-dashed border-base-300 opacity-50">
+          <span>Open seat</span>
+          <span class="badge badge-ghost badge-sm">${team}</span>
+        </div>`;
+      }).join("");
+
+      const joined = g.players.length;
+      const alreadyIn = g.my_seat !== null;
+      const actionBtn = alreadyIn
+        ? `<button type="button" class="btn btn-ghost" onclick="leaveEuchre()">Leave</button>`
+        : `<button type="button" class="btn btn-primary" ${joined >= 4 ? "disabled" : ""} onclick="joinEuchre()">Join</button>`;
+
+      return `
+        <p class="opacity-60 mb-3">Waiting for players (${joined}/4)…</p>
+        <div class="space-y-1.5 mb-4">${rows}</div>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="abandonGame()">Cancel game</button>
+          ${actionBtn}
+        </div>
+      `;
+    }
+
+    function renderEuchreTable(g) {
+      const h = g.hand;
+      if (!h) return `<p class="opacity-60">Dealing…</p>`;
+
+      const scoreboard = `
+        <div class="flex items-center justify-center gap-6 mb-4">
+          <div class="text-center"><div class="text-xs opacity-50">Team 1 (seats 1 &amp; 3)</div><div class="text-2xl font-bold">${g.team0_score}</div></div>
+          <div class="opacity-30">–</div>
+          <div class="text-center"><div class="text-xs opacity-50">Team 2 (seats 2 &amp; 4)</div><div class="text-2xl font-bold">${g.team1_score}</div></div>
+        </div>
+      `;
+
+      let middle = "";
+      if (h.phase === "hand_review") {
+        middle = renderHandReview(g, h);
+      } else if (h.phase === "bidding_round1" || h.phase === "bidding_round2") {
+        middle = renderTrickArea(g, h) + renderBidControls(g, h);
+      } else if (h.phase === "dealer_discard") {
+        middle = renderDiscardControls(g, h);
+      } else if (h.phase === "playing") {
+        middle = renderTrickArea(g, h);
+      }
+
+      return `
+        ${scoreboard}
+        ${renderEuchreSeats(g, h)}
+        ${renderPauseAlert(g, h)}
+        ${middle}
+        ${renderEuchreHand(g, h)}
+        <div class="flex justify-end mt-4">
+          <button type="button" class="btn btn-ghost btn-xs opacity-60" onclick="abandonGame()">Abandon game</button>
+        </div>
+      `;
+    }
+
+    function renderEuchreSeats(g, h) {
+      const cells = [0, 1, 2, 3].map((seat) => {
+        const p = g.players.find((pl) => pl.seat === seat);
+        const isDealer = seat === h.dealer_seat;
+        const isTurn = seat === h.current_turn_seat;
+        const isMaker = seat === h.maker_seat;
+        const sittingOut = seat === h.alone_sitting_out_seat;
+        const name = p ? p.user_name || "Player" : "—";
+        const badges = [
+          isDealer ? '<span class="badge badge-ghost badge-xs">Dealer</span>' : "",
+          isMaker ? '<span class="badge badge-primary badge-xs">Maker</span>' : "",
+          sittingOut ? '<span class="badge badge-ghost badge-xs">Sitting out</span>' : "",
+        ].join(" ");
+        return `<div class="flex flex-col items-center gap-1 p-2 rounded ${isTurn ? "bg-primary/10 ring-1 ring-primary" : ""}">
+          <span class="text-sm truncate max-w-full ${seat === g.my_seat ? "font-bold" : ""}">${escapeHtml(name)}</span>
+          <div class="flex gap-1">${badges}</div>
+        </div>`;
+      }).join("");
+
+      const trump = h.trump_suit
+        ? `<div class="text-center text-sm mb-2">Trump: <span class="font-bold ${suitColorClass(h.trump_suit)}">${suitSymbol(h.trump_suit)}</span>${h.going_alone ? " · going alone" : ""}</div>`
+        : "";
+
+      return `${trump}<div class="grid grid-cols-4 gap-2 mb-3">${cells}</div>`;
+    }
+
+    function renderPauseAlert(g, h) {
+      if (h.phase === "hand_review" || h.current_turn_seat === null) return "";
+      const p = g.players.find((pl) => pl.seat === h.current_turn_seat);
+      if (!p || state.presence[String(p.user_id)]) return "";
+      return `<div class="alert alert-warning mb-3 py-2 text-sm">Waiting for ${escapeHtml(p.user_name || "player")} to reconnect…</div>`;
+    }
+
+    function renderTrickArea(g, h) {
+      if (!h.current_trick_plays.length) {
+        return `<div class="text-center opacity-40 text-sm mb-3">No cards played yet this trick.</div>`;
+      }
+      const items = h.current_trick_plays.map((pl) => {
+        const p = g.players.find((pp) => pp.seat === pl.seat);
+        return `<div class="flex flex-col items-center gap-1">
+          <span class="badge badge-lg ${suitColorClass(pl.card[1])}">${cardLabel(pl.card)}</span>
+          <span class="text-xs opacity-50">${escapeHtml(p ? p.user_name : "")}</span>
+        </div>`;
+      }).join("");
+      return `<div class="flex justify-center gap-3 mb-3">${items}</div>`;
+    }
+
+    function renderBidControls(g, h) {
+      const isMyTurn = g.my_seat !== null && g.my_seat === h.current_turn_seat;
+      const dealerP = g.players.find((pl) => pl.seat === h.dealer_seat);
+      const header = `<div class="text-center mb-3">
+        <div class="text-xs opacity-50 mb-1">${h.phase === "bidding_round1" ? "Turned up" : "Turned down"}</div>
+        <span class="badge badge-lg ${suitColorClass(h.turned_up_card[1])}">${cardLabel(h.turned_up_card)}</span>
+        <div class="text-xs opacity-50 mt-1">Dealer: ${escapeHtml(dealerP ? dealerP.user_name : "")}</div>
+      </div>`;
+
+      if (!isMyTurn) {
+        const p = g.players.find((pl) => pl.seat === h.current_turn_seat);
+        return header + `<p class="text-center opacity-60 text-sm">Waiting for ${escapeHtml(p ? p.user_name : "player")} to bid…</p>`;
+      }
+
+      if (h.phase === "bidding_round1") {
+        return header + `
+          <div class="flex flex-col items-center gap-2">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="euchre-alone-r1" class="checkbox checkbox-sm" /> Go alone if I order it up</label>
+            <div class="flex gap-2">
+              <button type="button" class="btn btn-primary btn-sm" onclick="submitBid('order_up', null, $('#euchre-alone-r1').checked)">Order it up</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="submitBid('pass')">Pass</button>
+            </div>
+          </div>
+        `;
+      }
+
+      const suits = ["S", "H", "D", "C"].filter((s) => s !== h.turned_up_card[1]);
+      const suitBtns = suits.map((s) =>
+        `<button type="button" class="btn btn-sm ${suitColorClass(s)}" onclick="submitBid('call', '${s}', $('#euchre-alone-r2').checked)">${suitSymbol(s)}</button>`
+      ).join(" ");
+      return header + `
+        <div class="flex flex-col items-center gap-2">
+          <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="euchre-alone-r2" class="checkbox checkbox-sm" /> Go alone if I call it</label>
+          <div class="flex gap-2">${suitBtns}</div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="submitBid('pass')">Pass</button>
+        </div>
+      `;
+    }
+
+    function renderDiscardControls(g, h) {
+      const isDealer = g.my_seat === h.dealer_seat;
+      if (!isDealer) {
+        const dealerP = g.players.find((pl) => pl.seat === h.dealer_seat);
+        return `<p class="text-center opacity-60 text-sm mb-3">Waiting for ${escapeHtml(dealerP ? dealerP.user_name : "dealer")} to discard…</p>`;
+      }
+      return `<p class="text-center opacity-60 text-sm mb-3">Pick a card below to discard.</p>`;
+    }
+
+    function renderEuchreHand(g, h) {
+      if (!g.my_hand || !g.my_hand.length) return "";
+      const canDiscard = h.phase === "dealer_discard" && g.my_seat === h.dealer_seat;
+      const canPlay = h.phase === "playing" && g.my_seat === h.current_turn_seat;
+      const cards = [...g.my_hand].sort();
+      const btns = cards.map((c) => {
+        const handler = canDiscard ? `submitDiscard('${c}')` : canPlay ? `playCard('${c}')` : null;
+        const cls = handler ? "btn btn-sm" : "btn btn-sm btn-disabled";
+        return `<button type="button" class="${cls} ${suitColorClass(c[1])}" ${handler ? `onclick="${handler}"` : "disabled"}>${cardLabel(c)}</button>`;
+      }).join(" ");
+      return `<div class="divider text-xs opacity-40">Your hand</div><div class="flex flex-wrap justify-center gap-2">${btns}</div>`;
+    }
+
+    function renderHandReview(g, h) {
+      const r = h.result;
+      let text = "";
+      if (r) {
+        const team = r.maker_team === 0 ? "Team 1" : "Team 2";
+        if (r.euchred) {
+          const defenders = r.maker_team === 0 ? "Team 2" : "Team 1";
+          text = `${team} was euchred — ${defenders} scores 2.`;
+        } else {
+          const points = r.maker_team === 0 ? r.points_team0 : r.points_team1;
+          text = `${team} made it${r.march ? " with a march" : ""} — scores ${points}.`;
+        }
+      }
+      return `
+        <div class="alert alert-info mb-3">${text}</div>
+        <div class="flex justify-center">
+          <button type="button" class="btn btn-primary" onclick="continueHand()">Continue</button>
+        </div>
+      `;
     }
 
     // ------------------------------------------------------------------

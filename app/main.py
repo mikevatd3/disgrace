@@ -6,7 +6,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
-from app.routers import messages, rooms, sessions
+from app.routers import games, messages, rooms, sessions
 from app.routers.messages import search_router
 from app.ws import router as ws_router
 
@@ -27,6 +27,7 @@ app.include_router(sessions.router)
 app.include_router(rooms.router)
 app.include_router(messages.router)
 app.include_router(search_router)
+app.include_router(games.router)
 app.include_router(ws_router)
 
 # Serve the static frontend at "/". Mounted last so /api and /ws routes win.
