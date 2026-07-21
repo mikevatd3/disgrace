@@ -136,6 +136,11 @@
           </button>
           <span class="text-base-content/50 font-bold text-lg">#</span>
           <span id="room-title" class="font-semibold text-base flex-1 min-w-0 truncate"></span>
+          <button type="button" id="euchre-toggle-btn" class="btn btn-ghost btn-sm gap-1"
+            onclick="document.getElementById('euchre-modal').showModal()">
+            Euchre
+            <span id="euchre-badge" class="badge badge-primary badge-xs hidden"></span>
+          </button>
           <!-- Mobile-only search trigger (expands the bar below as an overlay) -->
           <button type="button" id="mobile-search-btn" onclick="openMobileSearch()" aria-label="Search"
             class="btn btn-ghost btn-sm btn-square md:hidden -mr-1">
