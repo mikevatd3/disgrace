@@ -86,6 +86,7 @@ class MessageOut(BaseModel):
     user_avatar: str | None = None
     reply_to: ReplySnippet | None = None
     body: str
+    image_url: str | None = None
     edited_at: datetime | None = None
     created_at: datetime
     reactions: list[ReactionOut] = []
@@ -95,6 +96,10 @@ class MessageOut(BaseModel):
 
 class MessageEdit(BaseModel):
     body: str
+
+
+class ImageUploadOut(BaseModel):
+    image_url: str
 
 
 class ReactionToggle(BaseModel):

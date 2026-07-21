@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,7 +8,8 @@ from sqlalchemy.orm import selectinload
 from app.auth import get_current_user
 from app.db import get_db
 from app.models import Message, Reaction, User
-from app.schemas import MessageEdit, MessageOut, ReactionOut, ReactionToggle, ReplySnippet
+from app.schemas import ImageUploadOut, MessageEdit, MessageOut, ReactionOut, ReactionToggle, ReplySnippet
+from app.uploads import save_upload
 
 router = APIRouter(prefix="/api/rooms", tags=["messages"], dependencies=[Depends(get_current_user)])
 search_router = APIRouter(prefix="/api/messages", tags=["search"], dependencies=[Depends(get_current_user)])
@@ -43,6 +44,7 @@ def _serialize(m: Message) -> MessageOut:
         user_avatar=m.user.avatar_url if m.user else None,
         reply_to=reply_to,
         body=m.body,
+        image_url=m.image_url,
         edited_at=m.edited_at,
         created_at=m.created_at,
         reactions=reactions,
@@ -74,6 +76,16 @@ async def list_messages(
     query = query.order_by(Message.id.desc()).limit(limit)
     result = await db.scalars(query)
     return [_serialize(m) for m in reversed(result.all())]
+
+
+@router.post("/{room_id}/messages/image", response_model=ImageUploadOut)
+async def upload_message_image(
+    room_id: int,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    image_url = await save_upload(file, f"msg{current_user.id}")
+    return ImageUploadOut(image_url=image_url)
 
 
 @router.patch("/{room_id}/messages/{message_id}", response_model=MessageOut)

@@ -164,7 +164,13 @@
         </div>
 
         <!-- Messages -->
-        <div id="messages" class="flex-1 overflow-y-auto py-4 space-y-0.5"></div>
+        <div class="flex-1 min-h-0 relative"
+          ondragover="msgListDragOver(event)" ondragleave="msgListDragLeave(event)" ondrop="msgListDrop(event)">
+          <div id="messages" class="absolute inset-0 overflow-y-auto py-4 space-y-0.5"></div>
+          <div id="msg-drop-overlay" class="hidden absolute inset-0 z-10 border-2 border-dashed border-primary bg-primary/10 items-center justify-center text-sm font-medium text-primary">
+            Drop image to attach
+          </div>
+        </div>
 
         <!-- Reply bar -->
         <div id="reply-bar" class="hidden mx-4 mb-1 px-3 py-1.5 bg-base-200 rounded-t-lg flex items-center gap-2 text-sm border border-base-300 border-b-0">
@@ -174,8 +180,21 @@
           <button type="button" class="btn btn-ghost btn-xs" onclick="cancelReply()">✕</button>
         </div>
 
+        <!-- Staged image preview -->
+        <div id="msg-image-preview" class="hidden mx-4 mb-1 px-3 py-1.5 bg-base-200 rounded-t-lg flex items-center gap-2 text-sm border border-base-300 border-b-0">
+          <img id="msg-image-preview-thumb" class="w-8 h-8 rounded object-cover flex-shrink-0" alt="" />
+          <span class="opacity-50 truncate flex-1">Image attached</span>
+          <button type="button" class="btn btn-ghost btn-xs" onclick="clearStagedImage()">✕</button>
+        </div>
+        <div id="msg-image-error" class="hidden mx-4 mb-1 alert alert-error text-sm py-2"><span></span></div>
+
         <!-- Message input -->
         <form id="message-form" class="px-4 pb-6 pt-1 flex items-center gap-2">
+          <input id="msg-image-input" type="file" accept="image/jpeg,image/png,image/gif,image/webp" class="hidden" onchange="msgImageFileSelected(this)" />
+          <button type="button" id="attach-image-btn" title="Attach image" onclick="document.getElementById('msg-image-input').click()"
+            class="btn btn-ghost btn-sm btn-square flex-shrink-0 opacity-60 hover:opacity-100">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 0119.5 7.372L8.552 18.32"/></svg>
+          </button>
           <div class="flex-1 flex items-center bg-base-200 rounded-lg px-3 gap-2">
             <input
               id="message-input"
@@ -789,6 +808,9 @@
           '</div>' +
           replyHtml +
           '<p class="msg-body text-sm leading-relaxed break-words">' + buildBodyHtml(msg) + '</p>' +
+          (msg.image_url
+            ? '<img src="' + escapeHtml(msg.image_url) + '" class="msg-image mt-1 max-w-xs max-h-64 rounded-lg border border-base-300 object-cover cursor-pointer" onclick="window.open(this.src, \'_blank\')" />'
+            : "") +
           '<div class="msg-reactions flex flex-wrap gap-1 mt-1">' + buildReactionsHtml(msg) + '</div>' +
         '</div>' +
         menuHtml;
@@ -1427,19 +1449,83 @@
       selectRoom(room.id);
     });
 
-    $("#message-input").addEventListener("input", () => {
-      $("#send-btn").disabled = !$("#message-input").value.trim();
-    });
+    // ------------------------------------------------------------------
+    // Message image attachment (file picker + drag-and-drop onto #messages)
+    // ------------------------------------------------------------------
+    let _pendingImageUrl = null;
+
+    function updateSendBtnState() {
+      $("#send-btn").disabled = !$("#message-input").value.trim() && !_pendingImageUrl;
+    }
+
+    async function stageMessageImage(file) {
+      if (!file) return;
+      const errEl = $("#msg-image-error");
+      errEl.classList.add("hidden");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch(`/api/rooms/${state.currentRoomId}/messages/image`, { method: "POST", body: form });
+        if (!res.ok) {
+          const detail = await res.json().catch(() => ({}));
+          throw new Error(detail.detail || `${res.status} ${res.statusText}`);
+        }
+        const result = await res.json();
+        _pendingImageUrl = result.image_url;
+        $("#msg-image-preview-thumb").src = result.image_url;
+        $("#msg-image-preview").classList.remove("hidden");
+        updateSendBtnState();
+      } catch (err) {
+        errEl.querySelector("span").textContent = err.message;
+        errEl.classList.remove("hidden");
+      }
+    }
+
+    function clearStagedImage() {
+      _pendingImageUrl = null;
+      $("#msg-image-preview").classList.add("hidden");
+      $("#msg-image-input").value = "";
+      updateSendBtnState();
+    }
+
+    function msgImageFileSelected(input) {
+      const file = input.files[0];
+      if (file) stageMessageImage(file);
+    }
+
+    function msgListDragOver(e) {
+      e.preventDefault();
+      const overlay = $("#msg-drop-overlay");
+      overlay.classList.remove("hidden");
+      overlay.classList.add("flex");
+    }
+
+    function msgListDragLeave(e) {
+      const overlay = $("#msg-drop-overlay");
+      overlay.classList.add("hidden");
+      overlay.classList.remove("flex");
+    }
+
+    function msgListDrop(e) {
+      e.preventDefault();
+      msgListDragLeave(e);
+      const file = e.dataTransfer.files[0];
+      if (file) stageMessageImage(file);
+    }
+
+    $("#message-input").addEventListener("input", updateSendBtnState);
 
     $("#message-form").addEventListener("submit", (e) => {
       e.preventDefault();
       const input = $("#message-input");
       const body = input.value.trim();
-      if (!body || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
+      if ((!body && !_pendingImageUrl) || !state.socket || state.socket.readyState !== WebSocket.OPEN) return;
       const payload = { body };
       if (_replyTo) payload.reply_to_id = _replyTo.id;
+      if (_pendingImageUrl) payload.image_url = _pendingImageUrl;
       state.socket.send(JSON.stringify(payload));
       input.value = "";
+      clearStagedImage();
       $("#send-btn").disabled = true;
       cancelReply();
     });

@@ -92,7 +92,8 @@ async def room_socket(websocket: WebSocket, room_id: int):
             data = json.loads(raw)
             body = data.get("body", "").strip()
             reply_to_id = data.get("reply_to_id")
-            if not body:
+            image_url = data.get("image_url")
+            if not body and not image_url:
                 continue
 
             async with async_session() as db:
@@ -104,6 +105,7 @@ async def room_socket(websocket: WebSocket, room_id: int):
                     user_id=user.id,
                     body=body,
                     reply_to_id=reply_to_id,
+                    image_url=image_url,
                 )
                 db.add(message)
                 await db.commit()
