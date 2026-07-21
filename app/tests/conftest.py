@@ -28,4 +28,4 @@ async def clean_db():
     await engine.dispose()
     yield
     async with engine.begin() as conn:
-        await conn.execute(text("TRUNCATE messages, rooms, users RESTART IDENTITY CASCADE"))
+        await conn.execute(text("TRUNCATE messages, rooms, users, games RESTART IDENTITY CASCADE"))

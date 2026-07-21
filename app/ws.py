@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -38,6 +39,15 @@ class RoomConnectionManager:
 
     async def broadcast_event(self, room_id: int, event: str, payload: dict) -> None:
         await self._broadcast(room_id, {"event": event, "payload": payload})
+
+    async def send_to_user(self, room_id: int, user_id: int, message: dict) -> None:
+        for ws, u in list(self.rooms.get(room_id, {}).items()):
+            if u.id == user_id:
+                await ws.send_json(message)
+
+    async def broadcast_per_user(self, room_id: int, event: str, build_payload: Callable[[int], dict]) -> None:
+        for ws, u in list(self.rooms.get(room_id, {}).items()):
+            await ws.send_json({"event": event, "payload": build_payload(u.id)})
 
     def _user_info(self, user: User) -> dict:
         return {"name": user.name, "avatar_url": user.avatar_url}
