@@ -64,10 +64,9 @@ jobs:
       cancel-in-progress: false
 
     # No checkout step here on purpose: this job doesn't build in a throwaway
-    # runner workspace, it updates the persistent clone the dev machine's own
-    # `uvicorn --reload` process is already watching. That process picks up
-    # the new code on disk by itself — this job's only responsibility is
-    # getting the right code and dependencies onto disk.
+    # runner workspace, it updates the persistent clone that backs the
+    # systemd-managed chat_app service, then restarts that service to pick
+    # up the new code.
     steps:
       - name: Pull latest dev and sync dependencies
         working-directory: ${{ vars.DISGRACE_DEV_PATH }}
@@ -76,3 +75,6 @@ jobs:
           git merge --ff-only origin/dev
           uv sync --frozen
           uv run alembic upgrade head
+
+      - name: Restart chat_app service
+        run: sudo systemctl restart chat_app

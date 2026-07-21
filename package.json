@@ -1,0 +1,14 @@
+{
+  "name": "disgrace-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend CSS build (Tailwind + DaisyUI) for the chat app. Dev-only tooling; the compiled frontend/app.css is committed and served statically.",
+  "scripts": {
+    "build:css": "tailwindcss -i ./styles/app.css -o ./frontend/app.css --minify",
+    "watch:css": "tailwindcss -i ./styles/app.css -o ./frontend/app.css --watch"
+  },
+  "devDependencies": {
+    "daisyui": "^4.12.10",
+    "tailwindcss": "^3.4.17"
+  }
+}
